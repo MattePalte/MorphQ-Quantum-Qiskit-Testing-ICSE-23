@@ -1,0 +1,27 @@
+# fuzzing target
+qiskit==0.43.1
+
+# general tool s
+pytest
+click~=8.0.0
+coverage~=7.0.0
+pandas~=2.0.0
+PyYAML~=6.0
+ipython
+deprecated~=1.2.13
+astpretty~=2.1.0
+astunparse~=1.6.3
+rich~=13.0.0
+
+# general math dependencies
+scikit_learn
+scipy
+statsmodels
+numpy
+
+# graphical dependencies
+termcolor
+tqdm
+matplotlib
+networkx
+seaborn
