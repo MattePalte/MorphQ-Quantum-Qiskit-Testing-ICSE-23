@@ -78,32 +78,12 @@ You might want to test a different Qiskit version than the one used in the origi
     ```
 
 #### Coverage Metric
-Moreover, also you might want to track the coverage on different qiskit sub-packages.
-If you want to change the list of packages which are covered by the MorphQ evaluation, you can change the field `soruce` of [morphq_as_competitor.cover](config/template_coverage/morphq_as_competitor.cover) file, by adding each line a new package to cover, use the path of the `site-packages` folder as in the containerized environment: `/opt/conda/envs/MorphQAsCompetitor/lib/python3.10/site-packages/`.
-An example could be to track both `qiskit` core, `qiskit_aer` and `qiskit_terra` would be the following:
-```bash
-# file morphq_as_competitor.cover
-...
-source=
-    /opt/conda/envs/MorphQAsCompetitor/lib/python3.10/site-packages/qiskit
-    /opt/conda/envs/MorphQAsCompetitor/lib/python3.10/site-packages/qiskit_terra-0.43.1.dist-info
-    /opt/conda/envs/MorphQAsCompetitor/lib/python3.10/site-packages/qiskit_aer
-    /opt/conda/envs/MorphQAsCompetitor/lib/python3.10/site-packages/qiskit_aer-0.12.0.dist-info
-    /opt/conda/envs/MorphQAsCompetitor/lib/python3.10/site-packages/qiskit_aer.libs
-    /opt/conda/envs/MorphQAsCompetitor/lib/python3.10/site-packages/qiskit_ibmq_provider-0.20.2.dist-info
-    /opt/conda/envs/MorphQAsCompetitor/lib/python3.10/site-packages/qiskit_terra-0.24.1.dist-info
-...
-```
-To find the list for your qiskit packages you can run the following command in the docker container:
-```bash
-# [IN THE DOCKER CONTAINER]
-ls -la /opt/conda/envs/MorphQAsCompetitor/lib/python3.10/site-packages/
-```
-
 Since MorphQ is not using any feedback information on the coverage and the coverage instrumentation is slowing the fuzzer without any good reason, the coverage can also be computed offline after the MorphQ run has finished.
 If you need to compute the coverage while fuzzing you can do that by setting the `track_coverage` flag in the configuration file to `True` (see [morphq_as_competitor.yaml](config/template/morphq_as_competitor.yaml)).
 
 IMPORTANT: note that the results in the original paper are computed with the `track_coverage` flag set to `True`.
+
+We recommend to compute it offline since this can speed up the process.
 
 
 #### Run MorphQ: May the Best Fuzzer Win!
@@ -138,12 +118,16 @@ python -m lib.coverage.reorder_files -i data/qmt_v01/
 ```
 This will first extract all the generated files in order of generation in the `coverage_offline` folder, each file will be called: `1.fuzz`, `2.fuzz`, etc.
 
-Then run the following command (outside the docker container):
 ```bash
-# [YOUR SYSTEM]
-python -m lib.coverage.collect_coverage -f data/qmt_v01/programs_sorted/ -o data/qmt_v01/coverage_reports/ -n 10 -c config/qmt_v01.cover
+# [IN THE DOCKER CONTAINER]
+python -m lib.coverage.cumulative_coverage --target-folder data/qmt_v01/programs_sorted --output-folder data/qmt_v01/cumulative_coverage -n 10 --timeout 10 --file-extension .fuzz
 ```
-IMPORTANT: this command has to be run outside the docker container. We recommend to create a virtual environment and install the requirements in the [requirements.txt](requirements.txt) file.
+Note that by default we track the coverage on all the packages in the `site-packages` folder starting with `qiskit`, if you want to change this behavior you can do that by setting the `--packages-to-track` argument, for example:
+```bash
+# [IN THE DOCKER CONTAINER]
+python -m lib.coverage.cumulative_coverage --target-folder data/qmt_v01/programs_sorted --output-folder data/qmt_v01/cumulative_coverage -n 10 --timeout 10 --file-extension .fuzz --packages-to-track qiskit_aer --packages-to-track qiskit_ibmq_provider-0.20.2.dist-info
+```
+
 Then the `coverage.py` tool will compute the coverage for each generated program and then combine the results in a cumulative way.
 For example, if you choose a step of 10 program it will give you the coverage of the first 10 programs, then the coverage of the first 20 programs, etc.
 The output will be stored in a csv file called `cumulative_coverage.csv` in the `cumulative_coverage` folder, ready to be plot with your favorite tool.
