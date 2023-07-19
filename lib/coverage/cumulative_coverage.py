@@ -1,7 +1,8 @@
+"""Collect the coverage of a set of python files on some Python packages.
 
-CLEAN_GLOBALS = globals().copy()
-CLEAN_LOCALS = locals().copy()
-
+By default it collects the coverage of all the files related to qiskit, namely
+all those in the site-packages folder starting with "qiskit".
+"""
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -9,40 +10,12 @@ import click
 import coverage
 import pandas as pd
 from typing import List, Dict, Any, Tuple
-from lib.utils import break_function_with_timeout
 import time
 import matplotlib.pyplot as plt
 import subprocess
 import multiprocessing
 from multiprocessing import Pool
 from functools import partial
-
-
-def sandboxed_exec(python_code: str, data_file: str = None, config_file: str = None):
-    """Execute python code in a sandboxed environment."""
-    import coverage
-    coverage.process_startup()
-    cov = coverage.Coverage(
-        data_file=data_file,
-        data_suffix=True,
-        config_file=config_file
-    )
-    cov.load()
-    cov.start()
-    global CLEAN_GLOBALS
-    global CLEAN_LOCALS
-    print("Globals: ", globals())
-    print("Locals: ", locals())
-    # create a tmp globals and locals with the clean ones
-    tmp_globals = CLEAN_GLOBALS.copy()
-    tmp_locals = CLEAN_LOCALS.copy()
-    # execute the code
-    try:
-        exec(python_code, tmp_globals, tmp_locals)
-    except Exception as e:
-        print(f"Error: {e}")
-    cov.save()
-    return
 
 
 def run_coverage(
