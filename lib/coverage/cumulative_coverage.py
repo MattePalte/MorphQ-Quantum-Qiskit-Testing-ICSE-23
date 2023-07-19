@@ -12,6 +12,10 @@ from typing import List, Dict, Any, Tuple
 from lib.utils import break_function_with_timeout
 import time
 import matplotlib.pyplot as plt
+import subprocess
+import multiprocessing
+from multiprocessing import Pool
+from functools import partial
 
 
 def sandboxed_exec(python_code: str, data_file: str = None, config_file: str = None):
@@ -41,58 +45,139 @@ def sandboxed_exec(python_code: str, data_file: str = None, config_file: str = N
     return
 
 
+def run_coverage(
+        python_file_path: str,
+        timeout: int = None,
+        verbose: bool = False
+        ) -> bool:
+    """Run the coverage on the python file using the coverage cmd.
+
+    It runs the command:
+    `coverage run {python_file_path}` with a timeout
+    Nota that this assumes that the environment variables are set:
+    - COVERAGE_FILE
+    - COVERAGE_RCFILE
+
+    It returns True if the command was executed successfully, False otherwise.
+    """
+    # Create the command to run
+    cmd: List[str] = [
+        "coverage",
+        "run",
+        python_file_path,
+    ]
+    # Run the command
+    print(f"Running: {' '.join(cmd)}")
+    try:
+        res = subprocess.run(cmd, timeout=timeout, capture_output=True, check=True)
+        if verbose:
+            print(f"{python_file_path} \n - Stdout: \n{res.stdout}, \n - Stderr: \n{res.stderr}")
+    except subprocess.TimeoutExpired as e:
+        print(f"Timeout: {e}")
+        return False
+    except Exception as e:
+        print(f"Error in subprocess run: {e}")
+        return False
+    return True
+
+
 def run_files(
         sorted_files: List[str],
         data_file: str = None,
         config_file: str = None,
         save_coverage_every_n_files: int = None,
         out_folder: str = None,
-        timeout: int = None,):
-    """Run a list of files in isolated environments."""
+        timeout: int = None,
+        verbose: bool = False
+        ) -> Tuple[int, int]:
+    """Run a list of files in isolated environments.
+
+    it returns the number of files that were executed successfully and the
+    number of files that failed (e.g. timeout)
+    """
     # run each file
-    for i, f in enumerate(sorted_files):
-        # execute the file
-        # backup the globals and locals
-        print(f"Running {f}")
+    # chunck them in groups of n
+    groups = [
+        sorted_files[i:i + save_coverage_every_n_files]
+        for i in range(0, len(sorted_files), save_coverage_every_n_files)
+    ]
+    total_success = 0
+    total_failure = 0
+    for i, group in enumerate(groups):
+        print(f"Running group {i}")
         try:
+            # run all the files together
             start_time = time.time()
-            print(f"start exec: {start_time}")
-            break_function_with_timeout(
-                routine=sandboxed_exec,
-                seconds_to_wait=timeout,
-                message="Timeout.",
-                args=[open(f).read(), data_file, config_file]
-            )
-            # sandboxed_exec(open(f).read(), data_file, config_file)
+            # run_coverage(
+            #     python_file_path=f,
+            #     timeout=timeout
+            # )
+            # parallel version
+            n_processors = multiprocessing.cpu_count()
+            results = []
+            print(f"Using {n_processors} processors.")
+            with multiprocessing.Pool() as pool:
+                # divide the group in groups of n_processors elements
+                # e.g. if n_processors = 4 and group = [1,2,3,4,5,6,7,8,9,10]
+                # then the new_groups will be:
+                # [[1,2,3,4], [5,6,7,8], [9,10]]
+                partial_groups = [
+                    group[i:i + n_processors]
+                    for i in range(0, len(group), n_processors)
+                ]
+                for partial_group in partial_groups:
+                    print(f"Running group: {partial_group}")
+                    partial_results = pool.map(
+                        partial(
+                            run_coverage,
+                            timeout=timeout,
+                            verbose=verbose
+                        ),
+                        partial_group
+                    )
+                    # add results to the total
+                    results += partial_results
+            # count how many True (success) and False (failure)
+            n_success = sum(results)
+            n_failure = len(results) - n_success
+            total_success += n_success
+            total_failure += n_failure
             end_time = time.time()
             diff = end_time - start_time
-            print(f"end exec. duration: {diff} seconds.")
+            print(f"End exec. duration {diff:.4f} seconds.")
+            print(f"Run {len(results)} files in this chunk.")
+            print(f"[parallelism batch size: {n_processors} - timeout per batch:{timeout} seconds.]")
+            print(f"Total success: {n_success}. Total failure (timeout): {n_failure}")
         except Exception as e:
             print(f"Error: {e}")
-        if save_coverage_every_n_files is not None and \
-                i % save_coverage_every_n_files == 0:
-            # save coverage
-            cov = coverage.Coverage(
-                data_file=data_file,
-                data_suffix=True,
-                config_file=config_file
-            )
-            cov.load()
-            cov.combine()
-            cov.save()
-            cov.load()
-            # create report for the last n files
-            xml_path = os.path.join(out_folder, f"coverage_{i}.xml")
+        # save coverage
+        cov = coverage.Coverage(
+            data_file=data_file,
+            data_suffix=True,
+            config_file=config_file
+        )
+        cov.load()
+        cov.combine()
+        cov.save()
+        cov.load()
+        # create report for the last n files
+        start_val = i * save_coverage_every_n_files
+        end_val = start_val + len(group) - 1
+        xml_path = os.path.join(out_folder, f"coverage_{start_val}_{end_val}.xml")
+        try:
             cov.xml_report(outfile=xml_path)
+        except Exception as e:
+            print(f"Error: {e}")
+    return total_success, total_failure
 
 
 def create_cumulative_coverage_csv(output_folder: str):
     """Collect the coverage from all the file and create a csv file.
 
     The files are:
-    - coverage_0.xml
-    - coverage_10.xml
-    - coverage_20.xml
+    - coverage_0_9.xml
+    - coverage_10_19.xml
+    - coverage_20_29.xml
     ...
     Each xml contains the
     """
@@ -101,13 +186,14 @@ def create_cumulative_coverage_csv(output_folder: str):
     relevant_files = [
         os.path.join(output_folder, f)
         for f in os.listdir(output_folder)
-        if re.match(r"coverage_\d+\.xml", f)
+        if re.match(r"coverage_\d+_\d+\.xml", f)
     ]
     for j, path_xml_file in enumerate(relevant_files):
         tree = ET.parse(path_xml_file)
         root = tree.getroot()
         total_coverage = float(root.attrib["line-rate"])
-        n_files = int(re.search(r"coverage_(\d+)\.xml", path_xml_file).group(1))
+        interval_end = int(re.search(r"coverage_\d+_(\d+)\.xml", path_xml_file).group(1))
+        n_files = interval_end + 1
         all_records.append({
             "n_files": n_files,
             "perc_total_coverage": total_coverage})
@@ -117,14 +203,12 @@ def create_cumulative_coverage_csv(output_folder: str):
     return output_csv
 
 
-
 def plot_data(path_csv: str, path_output: str):
     """Plot the data in the csv file and save the plot in the path_output."""
     df = pd.read_csv(path_csv)
     df = df.sort_values(by="n_files")
     df.plot(x="n_files", y="perc_total_coverage")
     plt.savefig(os.path.join(path_output, "cumulative_coverage.png"))
-
 
 
 @click.command()
@@ -163,21 +247,29 @@ def plot_data(path_csv: str, path_output: str):
     multiple=True,
     help="The packages to track in the site-packages folder (use relative names, e.g. qiskit_aer).",
 )
-def main(target_folder: str, output_folder: str, every_n_files: int, timeout: int, file_extension: str, packages_to_track: List[str]):
+@click.option(
+    "--verbose",
+    "-v",
+    default=False,
+    help="Print more info (such as the output of the programs, increase the timeout because the printout slows the execution).",
+)
+def main(target_folder: str, output_folder: str, every_n_files: int, timeout: int, file_extension: str, packages_to_track: List[str], verbose: bool):
     """Collect the coverage info for all packages starting with "qiskit"."""
     # create the output folder
     os.makedirs(output_folder, exist_ok=True)
+    data_file = os.path.join(output_folder, ".mycoverage")
+    abs_data_file = os.path.abspath(data_file)
     # get the site-packages directory
     site_packages = os.path.dirname(os.path.dirname(coverage.__file__))
-    if packages_to_track is None:
+    print(f"Packages to track: {packages_to_track}")
+    if len(packages_to_track) == 0:
+        print("expected qiskit packages.")
         # get all the folders starting with "qiskit"
         qiskit_folders = [
             os.path.join(site_packages, f)
             for f in os.listdir(site_packages)
             if f.startswith("qiskit")
         ]
-        for f in qiskit_folders:
-            print(f)
         packages_to_track = qiskit_folders
     else:
         # add the site-packages folder prefix to the packages_to_track
@@ -186,6 +278,10 @@ def main(target_folder: str, output_folder: str, every_n_files: int, timeout: in
             for f in packages_to_track
         ]
     list_of_packages = "\n    ".join(packages_to_track)
+    print("Packages to track:")
+    for f in packages_to_track:
+        print(f)
+    concatenated_packages = ",".join(packages_to_track)
     config_file_content = f"""
 [run]
 branch = True
@@ -193,39 +289,53 @@ concurrency = multiprocessing
 parallel = True
 source =
     {list_of_packages}
+
+# {concatenated_packages}
 """
     # create the .coveragerc file
     config_file_path = os.path.join(output_folder, ".coveragerc")
     with open(config_file_path, "w") as f:
         f.write(config_file_content)
+    abs_config_file_path = os.path.abspath(config_file_path)
 
-    data_file = os.path.join(output_folder, ".mycoverage")
+    # set the two as environment variables
+    os.environ["COVERAGE_FILE"] = abs_data_file
+    os.environ["COVERAGE_RCFILE"] = abs_config_file_path
 
     # get all files starting with "to_run"
     files = [
         os.path.join(target_folder, f)
         for f in os.listdir(target_folder)
         if f.endswith(file_extension)]
-    sorted_files = sorted(files)
+    # filenames
+    # 1.fuzz
+    # 2.fuzz
+    # 3.fuzz
+    # ...
+    # 10.fuzz
+    sorted_files = sorted(files, key=lambda x: int(re.search(r"(\d+)\.fuzz", x).group(1)))
 
     # list of files to run
     for f in sorted_files:
         print(f)
 
     # run the files
-    run_files(
+    total_success, total_failure = run_files(
         sorted_files=sorted_files,
-        data_file=data_file,
-        config_file=config_file_path,
+        data_file=abs_data_file,
+        config_file=abs_config_file_path,
         save_coverage_every_n_files=every_n_files,
         out_folder=output_folder,
-        timeout=timeout
+        timeout=timeout,
+        verbose=verbose
     )
+    print("-" * 80)
+    print(f"Total success: {total_success}. Total failure (timeout): {total_failure}")
 
     cov = coverage.Coverage(
-        data_file=data_file,
+        data_file=abs_data_file,
         data_suffix=True,
-        config_file=config_file_path
+        config_file=abs_config_file_path
     )
     cov.load()
     cov.combine()

@@ -120,7 +120,7 @@ This will first extract all the generated files in order of generation in the `c
 
 ```bash
 # [IN THE DOCKER CONTAINER]
-python -m lib.coverage.cumulative_coverage --target-folder data/qmt_v01/programs_sorted --output-folder data/qmt_v01/cumulative_coverage -n 10 --timeout 10 --file-extension .fuzz
+python -m lib.coverage.cumulative_coverage --target-folder data/qmt_v01/programs_sorted --output-folder data/qmt_v01/cumulative_coverage -n 50 --timeout 10 --file-extension .fuzz
 ```
 Note that by default we track the coverage on all the packages in the `site-packages` folder starting with `qiskit`, if you want to change this behavior you can do that by setting the `--packages-to-track` argument, for example:
 ```bash
