@@ -29,7 +29,7 @@ class ToQasmAndBack(MetamorphicTransformation):
     def derive(self, code_of_source: str) -> str:
         """Add QASM section to convert it and back before execution.
         """
-        qasm_version = self.mr_config["qasm_version"]
+        qasm_version = int(self.mr_config["qasm_version"])
         before_sections = self.mr_config["before_sections"]
 
         before_section = random.choice(before_sections)
@@ -46,8 +46,12 @@ class ToQasmAndBack(MetamorphicTransformation):
             r"\s=\sexecute\(([a-zA0-9_]+)", execution_area).group(1)
 
         qasm_conversion_area = "\n"
-        qasm_conversion_area = f"{main_circuit_id} = " + \
+        if qasm_version == 2:
+            qasm_conversion_area = f"{main_circuit_id} = " + \
             f"QuantumCircuit.from_qasm_str({main_circuit_id}.qasm())\n"
+        elif qasm_version == 3:
+            qasm_conversion_area = f"from qiskit import qasm3\n" + \
+            f"{main_circuit_id} = qasm3.loads(qasm3.dumps({main_circuit_id}))\n"
         sections["QASM_CONVERSION"] = qasm_conversion_area
 
         print(f"Follow: add '{main_circuit_id}' conversion to and from QASM " +
