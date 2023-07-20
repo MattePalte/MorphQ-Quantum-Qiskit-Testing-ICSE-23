@@ -21,6 +21,9 @@ RUN mkdir data
 # copy .gitignore
 COPY .gitignore /opt/.gitignore
 
+# make the opt accessible for all users
+RUN chmod -R 777 /opt
+
 
 # CMD ["python"]
 CMD ["/bin/bash"]
